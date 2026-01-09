@@ -253,9 +253,14 @@ async def get_full_reading_stream(request: FullReadingRequest):
 
     print(f"[OK] 프롬프트 준비 완료 (system: {len(system_prompt)}자, user: {len(user_message)}자)")
 
+    # Railway edge 서버 버퍼 강제 플러시용 패딩 (2KB)
+    PADDING = " " * 2048
+
     async def stream_generator():
         try:
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] LLM 스트리밍 시작...")
+            # 초기 패딩으로 버퍼 플러시
+            yield f": {PADDING}\n\n"
             for chunk in llm_client.stream(system_prompt, user_message):
                 yield f"data: {json.dumps({'token': chunk})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
@@ -271,6 +276,7 @@ async def get_full_reading_stream(request: FullReadingRequest):
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "Transfer-Encoding": "chunked",
         }
     )
 
@@ -300,8 +306,12 @@ async def get_first_impression_stream(request: FirstImpressionRequest):
     variables = get_template_variables(saju_data, user_name)
     user_message = render_template(user_template, variables)
 
+    # Railway edge 서버 버퍼 강제 플러시용 패딩 (2KB)
+    PADDING = " " * 2048
+
     async def stream_generator():
         try:
+            yield f": {PADDING}\n\n"
             for chunk in llm_client.stream(system_prompt, user_message):
                 yield f"data: {json.dumps({'token': chunk})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
@@ -315,6 +325,7 @@ async def get_first_impression_stream(request: FirstImpressionRequest):
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "Transfer-Encoding": "chunked",
         }
     )
 
@@ -344,8 +355,12 @@ async def get_step_stream(request: StepRequest):
     variables = get_template_variables(saju_data, user_name)
     user_message = render_template(user_template, variables)
 
+    # Railway edge 서버 버퍼 강제 플러시용 패딩 (2KB)
+    PADDING = " " * 2048
+
     async def stream_generator():
         try:
+            yield f": {PADDING}\n\n"
             for chunk in llm_client.stream(system_prompt, user_message):
                 yield f"data: {json.dumps({'token': chunk})}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
@@ -359,6 +374,7 @@ async def get_step_stream(request: StepRequest):
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "Transfer-Encoding": "chunked",
         }
     )
 
