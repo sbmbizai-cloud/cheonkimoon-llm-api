@@ -11,7 +11,9 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
+import asyncio
 from typing import Optional, List
 import json
 from dotenv import load_dotenv
@@ -253,32 +255,27 @@ async def get_full_reading_stream(request: FullReadingRequest):
 
     print(f"[OK] 프롬프트 준비 완료 (system: {len(system_prompt)}자, user: {len(user_message)}자)")
 
-    # Railway edge 서버 버퍼 강제 플러시용 패딩 (2KB)
-    PADDING = " " * 2048
-
-    async def stream_generator():
+    async def event_generator():
         try:
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] LLM 스트리밍 시작...")
-            # 초기 패딩으로 버퍼 플러시
-            yield f": {PADDING}\n\n"
-            for chunk in llm_client.stream(system_prompt, user_message):
-                yield f"data: {json.dumps({'token': chunk})}\n\n"
-            yield f"data: {json.dumps({'done': True})}\n\n"
+            # 동기 generator를 별도 스레드에서 실행
+            loop = asyncio.get_event_loop()
+            stream_iter = iter(llm_client.stream(system_prompt, user_message))
+
+            while True:
+                try:
+                    chunk = await loop.run_in_executor(None, next, stream_iter)
+                    yield {"event": "message", "data": json.dumps({"token": chunk})}
+                except StopIteration:
+                    break
+
+            yield {"event": "message", "data": json.dumps({"done": True})}
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 스트리밍 완료")
         except Exception as e:
             print(f"[ERROR] 스트리밍 실패: {str(e)}")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield {"event": "error", "data": json.dumps({"error": str(e)})}
 
-    return StreamingResponse(
-        stream_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "Transfer-Encoding": "chunked",
-        }
-    )
+    return EventSourceResponse(event_generator())
 
 
 @app.post("/first-impression-stream")
@@ -306,28 +303,23 @@ async def get_first_impression_stream(request: FirstImpressionRequest):
     variables = get_template_variables(saju_data, user_name)
     user_message = render_template(user_template, variables)
 
-    # Railway edge 서버 버퍼 강제 플러시용 패딩 (2KB)
-    PADDING = " " * 2048
-
-    async def stream_generator():
+    async def event_generator():
         try:
-            yield f": {PADDING}\n\n"
-            for chunk in llm_client.stream(system_prompt, user_message):
-                yield f"data: {json.dumps({'token': chunk})}\n\n"
-            yield f"data: {json.dumps({'done': True})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            loop = asyncio.get_event_loop()
+            stream_iter = iter(llm_client.stream(system_prompt, user_message))
 
-    return StreamingResponse(
-        stream_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "Transfer-Encoding": "chunked",
-        }
-    )
+            while True:
+                try:
+                    chunk = await loop.run_in_executor(None, next, stream_iter)
+                    yield {"event": "message", "data": json.dumps({"token": chunk})}
+                except StopIteration:
+                    break
+
+            yield {"event": "message", "data": json.dumps({"done": True})}
+        except Exception as e:
+            yield {"event": "error", "data": json.dumps({"error": str(e)})}
+
+    return EventSourceResponse(event_generator())
 
 
 @app.post("/step-stream")
@@ -355,28 +347,23 @@ async def get_step_stream(request: StepRequest):
     variables = get_template_variables(saju_data, user_name)
     user_message = render_template(user_template, variables)
 
-    # Railway edge 서버 버퍼 강제 플러시용 패딩 (2KB)
-    PADDING = " " * 2048
-
-    async def stream_generator():
+    async def event_generator():
         try:
-            yield f": {PADDING}\n\n"
-            for chunk in llm_client.stream(system_prompt, user_message):
-                yield f"data: {json.dumps({'token': chunk})}\n\n"
-            yield f"data: {json.dumps({'done': True})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            loop = asyncio.get_event_loop()
+            stream_iter = iter(llm_client.stream(system_prompt, user_message))
 
-    return StreamingResponse(
-        stream_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-            "Transfer-Encoding": "chunked",
-        }
-    )
+            while True:
+                try:
+                    chunk = await loop.run_in_executor(None, next, stream_iter)
+                    yield {"event": "message", "data": json.dumps({"token": chunk})}
+                except StopIteration:
+                    break
+
+            yield {"event": "message", "data": json.dumps({"done": True})}
+        except Exception as e:
+            yield {"event": "error", "data": json.dumps({"error": str(e)})}
+
+    return EventSourceResponse(event_generator())
 
 
 if __name__ == "__main__":
