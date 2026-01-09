@@ -268,8 +268,9 @@ async def get_full_reading_stream(request: FullReadingRequest):
         stream_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         }
     )
 
@@ -311,8 +312,9 @@ async def get_first_impression_stream(request: FirstImpressionRequest):
         stream_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         }
     )
 
@@ -354,8 +356,9 @@ async def get_step_stream(request: StepRequest):
         stream_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         }
     )
 
