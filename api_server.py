@@ -79,8 +79,8 @@ def load_v8_prompts():
     return None
 
 
-# v10.0 프롬프트 경로 (배포용 - prompts 폴더)
-V10_PROMPT_PATH = BASE_DIR / "prompts" / "v10.0_parallel.yaml"
+# v10.2 프롬프트 경로 (배포용 - prompts 폴더)
+V10_PROMPT_PATH = BASE_DIR / "prompts" / "v10.2_parallel.yaml"
 
 
 def load_v10_prompts():
