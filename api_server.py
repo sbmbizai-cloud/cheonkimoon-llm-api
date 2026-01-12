@@ -58,30 +58,30 @@ try:
 except Exception as e:
     print(f"[WARN] Default saju data load failed: {e}")
 
-# v8 프롬프트 경로 (배포용 - prompts 폴더)
-V8_PROMPT_PATH = BASE_DIR / "prompts" / "v8_system_prompt.yaml"
+# v9.1 프롬프트 경로 (배포용 - prompts 폴더)
+V9_PROMPT_PATH = BASE_DIR / "prompts" / "v9.1_with_buttons.yaml"
 
 
 def load_v8_prompts():
-    """v8 프롬프트 실시간 로드 (yaml 수정 즉시 반영)"""
+    """v9.1 프롬프트 실시간 로드 (yaml 수정 즉시 반영)"""
     try:
-        if V8_PROMPT_PATH.exists():
-            with open(V8_PROMPT_PATH, "r", encoding="utf-8") as f:
+        if V9_PROMPT_PATH.exists():
+            with open(V9_PROMPT_PATH, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
                 import datetime
                 timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-                print(f"[{timestamp}] v8 prompts loaded from disk")
+                print(f"[{timestamp}] v9.1 prompts loaded from disk")
                 return data
     except Exception as e:
-        print(f"[WARN] v8 prompts load failed: {e}")
+        print(f"[WARN] v9.1 prompts load failed: {e}")
     return None
 
 
 # 서버 시작 시 확인
-if V8_PROMPT_PATH.exists():
-    print("[OK] v8 prompts file found (will load on each request)")
+if V9_PROMPT_PATH.exists():
+    print("[OK] v9.1 prompts file found (will load on each request)")
 else:
-    print(f"[WARN] v8 prompts file not found at {V8_PROMPT_PATH}")
+    print(f"[WARN] v9.1 prompts file not found at {V9_PROMPT_PATH}")
 
 
 # ============ v8 헬퍼 함수 ============
@@ -218,7 +218,7 @@ async def health_check():
     """상세 헬스 체크"""
     return {
         "status": "ok",
-        "prompts_loaded": V8_PROMPT_PATH.exists(),
+        "prompts_loaded": V9_PROMPT_PATH.exists(),
         "default_data_loaded": DEFAULT_SAJU_DATA is not None
     }
 
@@ -235,7 +235,7 @@ async def get_full_reading_stream(request: FullReadingRequest):
 
     v8_prompts = load_v8_prompts()
     if not v8_prompts:
-        raise HTTPException(status_code=500, detail="v8 prompts not loaded")
+        raise HTTPException(status_code=500, detail="v9.1 prompts not loaded")
 
     unified_prompt = v8_prompts.get("unified_prompt", {})
     if not unified_prompt:
@@ -285,7 +285,7 @@ async def get_first_impression_stream(request: FirstImpressionRequest):
 
     v8_prompts = load_v8_prompts()
     if not v8_prompts:
-        raise HTTPException(status_code=500, detail="v8 prompts not loaded")
+        raise HTTPException(status_code=500, detail="v9.1 prompts not loaded")
 
     saju_data = request.saju_data if request.saju_data else DEFAULT_SAJU_DATA
     user_name = request.user_name if request.user_name != "사용자" else DEFAULT_USER_NAME
@@ -329,7 +329,7 @@ async def get_step_stream(request: StepRequest):
 
     v8_prompts = load_v8_prompts()
     if not v8_prompts:
-        raise HTTPException(status_code=500, detail="v8 prompts not loaded")
+        raise HTTPException(status_code=500, detail="v9.1 prompts not loaded")
 
     saju_data = request.saju_data if request.saju_data else DEFAULT_SAJU_DATA
     user_name = request.user_name if request.user_name != "사용자" else DEFAULT_USER_NAME
