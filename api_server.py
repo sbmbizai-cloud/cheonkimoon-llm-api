@@ -79,11 +79,35 @@ def load_v8_prompts():
     return None
 
 
+# v10.0 프롬프트 경로 (배포용 - prompts 폴더)
+V10_PROMPT_PATH = BASE_DIR / "prompts" / "v10.0_parallel.yaml"
+
+
+def load_v10_prompts():
+    """v10.0 프롬프트 실시간 로드 (yaml 수정 즉시 반영)"""
+    try:
+        if V10_PROMPT_PATH.exists():
+            with open(V10_PROMPT_PATH, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+                print(f"[{timestamp}] v10.0 prompts loaded from disk")
+                return data
+    except Exception as e:
+        print(f"[WARN] v10.0 prompts load failed: {e}")
+    return None
+
+
 # 서버 시작 시 확인
 if V9_PROMPT_PATH.exists():
     print("[OK] v9.1 prompts file found (will load on each request)")
 else:
     print(f"[WARN] v9.1 prompts file not found at {V9_PROMPT_PATH}")
+
+if V10_PROMPT_PATH.exists():
+    print("[OK] v10.0 prompts file found (will load on each request)")
+else:
+    print(f"[WARN] v10.0 prompts file not found at {V10_PROMPT_PATH}")
 
 
 # ============ v8 헬퍼 함수 ============
@@ -194,6 +218,13 @@ class FullReadingRequest(BaseModel):
 class StepRequest(BaseModel):
     """특정 스텝 풀이 요청"""
     step_name: str
+    user_name: str = "사용자"
+    saju_data: Optional[dict] = None
+
+
+class SectionRequest(BaseModel):
+    """특정 섹션 풀이 요청 (v10.0 병렬 처리용)"""
+    section_name: str  # "first-impression", "강점", "yearly", "재물운", "진로운", "성격", "연애운", "하반기경고"
     user_name: str = "사용자"
     saju_data: Optional[dict] = None
 
@@ -363,6 +394,70 @@ async def get_step_stream(request: StepRequest):
 
             yield {"event": "message", "data": json.dumps({"done": True})}
         except Exception as e:
+            yield {"event": "error", "data": json.dumps({"error": str(e)})}
+
+    return EventSourceResponse(event_generator())
+
+
+@app.post("/section-stream")
+async def get_section_stream(request: SectionRequest):
+    """특정 섹션 풀이 - 스트리밍 (v10.0 병렬 처리용)"""
+    import datetime
+
+    print(f"\n{'='*60}")
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] /section-stream 호출: {request.section_name}")
+    print(f"  - user_name: {request.user_name}")
+    print('='*60)
+
+    v10_prompts = load_v10_prompts()
+    if not v10_prompts:
+        raise HTTPException(status_code=500, detail="v10.0 prompts not loaded")
+
+    section_prompt = v10_prompts.get("section_prompts", {}).get(request.section_name, {})
+    if not section_prompt:
+        raise HTTPException(status_code=404, detail=f"section not found: {request.section_name}")
+
+    # 사주 데이터 결정
+    saju_data = request.saju_data if request.saju_data else DEFAULT_SAJU_DATA
+    user_name = request.user_name if request.user_name != "사용자" else DEFAULT_USER_NAME
+
+    # 변수 추출
+    variables = get_template_variables(saju_data, user_name)
+    timestamp = datetime.datetime.now().isoformat()
+
+    # 공통 시스템 + 섹션별 시스템 결합
+    common_system = v10_prompts.get("common_system", "")
+    section_system = section_prompt.get("system", "")
+    system_prompt = section_system.replace("{common_system}", common_system)
+    system_prompt = f"{system_prompt}\n\n[Internal timestamp: {timestamp}]"
+
+    # 공통 데이터 + 섹션별 템플릿 결합
+    common_data = v10_prompts.get("common_data_template", "")
+    section_user = section_prompt.get("user_template", "")
+    user_message = section_user.replace("{common_data_template}", common_data)
+    user_message = render_template(user_message, variables)
+
+    print(f"[OK] 섹션 프롬프트 준비 완료: {request.section_name}")
+    print(f"  - system_prompt 길이: {len(system_prompt)}자")
+    print(f"  - user_message 길이: {len(user_message)}자")
+
+    async def event_generator():
+        try:
+            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 섹션 스트리밍 시작: {request.section_name}")
+            loop = asyncio.get_event_loop()
+            stream_iter = iter(llm_client.stream(system_prompt, user_message))
+
+            while True:
+                try:
+                    chunk = await loop.run_in_executor(None, next, stream_iter)
+                    yield {"event": "message", "data": json.dumps({"token": chunk})}
+                except StopIteration:
+                    break
+
+            yield {"event": "message", "data": json.dumps({"done": True})}
+            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 섹션 스트리밍 완료: {request.section_name}")
+        except Exception as e:
+            print(f"[ERROR] 섹션 스트리밍 실패 ({request.section_name}): {str(e)}")
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
 
     return EventSourceResponse(event_generator())
