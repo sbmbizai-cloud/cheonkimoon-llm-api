@@ -48,15 +48,17 @@ SAJU_DATA_DIR = BASE_DIR / "saju_data"
 
 # 기본 테스트 데이터 로드
 DEFAULT_SAJU_DATA = None
-DEFAULT_USER_NAME = os.getenv("DEFAULT_USER_NAME", "테스트")
+DEFAULT_USER_NAME = None
 try:
     default_file = SAJU_DATA_DIR / "default.json"
     if default_file.exists():
         with open(default_file, "r", encoding="utf-8") as f:
             DEFAULT_SAJU_DATA = json.load(f)
+        DEFAULT_USER_NAME = DEFAULT_SAJU_DATA.get("meta", {}).get("이름", "테스트")
         print(f"[OK] Default saju data loaded: {DEFAULT_USER_NAME}")
 except Exception as e:
     print(f"[WARN] Default saju data load failed: {e}")
+    DEFAULT_USER_NAME = "테스트"
 
 # v9.1 프롬프트 경로 (배포용 - prompts 폴더)
 V9_PROMPT_PATH = BASE_DIR / "prompts" / "v9.1_with_buttons.yaml"
