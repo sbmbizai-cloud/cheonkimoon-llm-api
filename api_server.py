@@ -774,6 +774,7 @@ async def create_free_saju(
     }
 
 
+@app.get("/free-saju/{saju_id}")  # v3.0 호환 별칭
 @app.get("/api/v1/free-saju/{saju_id}")
 async def get_free_saju(saju_id: int):
     """
