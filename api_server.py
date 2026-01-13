@@ -63,7 +63,8 @@ async def startup():
             DATABASE_URL,
             min_size=1,
             max_size=10,
-            command_timeout=60
+            command_timeout=60,
+            statement_cache_size=0  # Supabase pgbouncer compatibility
         )
         print("[OK] Supabase connection pool created")
     except Exception as e:
