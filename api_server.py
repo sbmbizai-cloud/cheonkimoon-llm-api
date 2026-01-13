@@ -141,6 +141,46 @@ def load_v10_prompts():
     return None
 
 
+def load_prompts_by_variant(variant: Optional[str] = None):
+    """variant에 따라 다른 프롬프트 로드 (v4.0/v4.1 분기)
+
+    Args:
+        variant: "v4.0" (소프트 유도), "v4.1" (빠른 후킹), None (기본 v3.0)
+
+    Returns:
+        프롬프트 데이터 (dict) 또는 None
+    """
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+
+    try:
+        # variant에 따라 파일 경로 선택
+        if variant == "v4.0":
+            yaml_path = BASE_DIR / "prompts" / "v10.0_v4.0.yaml"
+            print(f"[{timestamp}] ✅ v4.0 variant selected (소프트 유도)")
+        elif variant == "v4.1":
+            yaml_path = BASE_DIR / "prompts" / "v10.0_v4.1.yaml"
+            print(f"[{timestamp}] ✅ v4.1 variant selected (빠른 후킹)")
+        else:
+            # None 또는 기타 값이면 기본 v3.0 (v10.2_parallel.yaml)
+            yaml_path = V10_PROMPT_PATH
+            print(f"[{timestamp}] ✅ v3.0 variant selected (기본)")
+
+        # 파일 존재 확인 및 로드
+        if yaml_path.exists():
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+                print(f"[{timestamp}] Prompts loaded from: {yaml_path.name}")
+                return data
+        else:
+            print(f"[{timestamp}] ⚠️  Prompt file not found: {yaml_path}")
+            return None
+
+    except Exception as e:
+        print(f"[{timestamp}] ❌ Prompt load failed: {e}")
+        return None
+
+
 # 서버 시작 시 확인
 if V9_PROMPT_PATH.exists():
     print("[OK] v9.1 prompts file found (will load on each request)")
@@ -422,6 +462,7 @@ class SectionRequest(BaseModel):
     section_name: str  # "first-impression", "강점", "yearly", "재물운", "진로운", "성격", "연애운", "하반기경고"
     user_name: str = "사용자"
     saju_data: Optional[dict] = None
+    variant: Optional[str] = None  # "v4.0" (소프트 유도), "v4.1" (빠른 후킹), None (기본 v3.0)
 
 
 class FreeSajuCreateRequest(BaseModel):
@@ -637,11 +678,13 @@ async def get_section_stream(request: SectionRequest):
     print(f"\n{'='*60}")
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] /section-stream 호출: {request.section_name}")
     print(f"  - user_name: {request.user_name}")
+    print(f"  - variant: {request.variant if request.variant else 'None (기본 v3.0)'}")
     print('='*60)
 
-    v10_prompts = load_v10_prompts()
+    # variant에 따라 프롬프트 로드
+    v10_prompts = load_prompts_by_variant(request.variant)
     if not v10_prompts:
-        raise HTTPException(status_code=500, detail="v10.0 prompts not loaded")
+        raise HTTPException(status_code=500, detail="prompts not loaded")
 
     section_prompt = v10_prompts.get("section_prompts", {}).get(request.section_name, {})
     if not section_prompt:
