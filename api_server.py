@@ -617,6 +617,7 @@ async def get_step_stream(request: StepRequest):
 
 
 @app.post("/section-stream")
+@app.post("/api/v1/section-stream")  # 별칭 추가 (프론트엔드 호환성)
 async def get_section_stream(request: SectionRequest):
     """특정 섹션 풀이 - 스트리밍 (v10.0 병렬 처리용)"""
     import datetime
