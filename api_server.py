@@ -723,18 +723,26 @@ async def get_section_stream(request: SectionRequest):
     async def event_generator():
         try:
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 섹션 스트리밍 시작: {request.section_name}")
+            full_text = ""  # 전체 텍스트 수집용
             loop = asyncio.get_event_loop()
             stream_iter = iter(llm_client.stream(system_prompt, user_message))
 
             while True:
                 try:
                     chunk = await loop.run_in_executor(None, next, stream_iter)
+                    full_text += chunk  # 텍스트 수집
                     yield {"event": "message", "data": json.dumps({"token": chunk})}
                 except StopIteration:
                     break
 
-            yield {"event": "message", "data": json.dumps({"done": True})}
-            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 섹션 스트리밍 완료: {request.section_name}")
+            # done 이벤트에 파싱된 파트 배열 포함
+            parts = parse_v8_response(full_text)
+            yield {"event": "message", "data": json.dumps({
+                "done": True,
+                "full_text": full_text,
+                "parts": parts
+            })}
+            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 섹션 스트리밍 완료: {request.section_name} ({len(parts)} parts)")
         except Exception as e:
             print(f"[ERROR] 섹션 스트리밍 실패 ({request.section_name}): {str(e)}")
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
