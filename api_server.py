@@ -8,7 +8,7 @@ import os
 import re
 import yaml
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
@@ -17,9 +17,17 @@ import asyncio
 from typing import Optional, List
 import json
 from dotenv import load_dotenv
+from datetime import datetime
+import httpx
+import secrets
+import string
+import asyncpg
 
 # .env 파일 로드 (현재 디렉토리)
 load_dotenv()
+
+# Supabase 연결 정보
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres.jlutbjmjpreauyanjzdd:cjsrlans1234@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres")
 
 # 현재 디렉토리 기준 경로 설정
 BASE_DIR = Path(__file__).parent
@@ -40,11 +48,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 전역 클라이언트
+# 전역 변수
 llm_client = LLMClient()
+db_pool: Optional[asyncpg.Pool] = None
+
+# 서버 시작/종료 이벤트
+@app.on_event("startup")
+async def startup():
+    """서버 시작 시 DB 연결 풀 생성"""
+    global db_pool
+    print("[INFO] Connecting to Supabase...")
+    try:
+        db_pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            min_size=1,
+            max_size=10,
+            command_timeout=60
+        )
+        print("[OK] Supabase connection pool created")
+    except Exception as e:
+        print(f"[ERROR] Failed to create DB pool: {e}")
+
+@app.on_event("shutdown")
+async def shutdown():
+    """서버 종료 시 DB 연결 풀 닫기"""
+    global db_pool
+    if db_pool:
+        await db_pool.close()
+        print("[INFO] Supabase connection pool closed")
 
 # 사주 데이터 디렉토리 (배포 환경용)
 SAJU_DATA_DIR = BASE_DIR / "saju_data"
+
+# 무료 사주 저장소 (비동기 만세력 API 통합용)
+STORAGE_DIR = BASE_DIR / "saju_data"
+STORAGE_DIR.mkdir(exist_ok=True)
+
+# 만세력 API URL
+MANSERYUK_API_URL = "https://api.cheongimun.com/api/v1/manseryuk/calculate-enriched"
 
 # 기본 테스트 데이터 로드
 DEFAULT_SAJU_DATA = None
@@ -200,6 +241,158 @@ def parse_v8_response(text: str) -> List[str]:
     return bubbles
 
 
+# ============ 만세력 API 통합 헬퍼 함수 ============
+
+async def save_to_db(form_data: dict) -> int:
+    """
+    Supabase에 초기 레코드 저장 (status: "processing")
+    Returns: 생성된 순차 ID (SERIAL)
+    """
+    global db_pool
+    if not db_pool:
+        raise Exception("DB pool not initialized")
+
+    async with db_pool.acquire() as conn:
+        result = await conn.fetchrow(
+            """
+            INSERT INTO free_saju_records (status, form_data, saju_data, error)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            """,
+            "processing",
+            json.dumps(form_data),
+            None,
+            None
+        )
+        saju_id = result['id']
+        print(f"[OK] Saved record to Supabase: ID={saju_id}")
+        return saju_id
+
+
+async def load_from_db(saju_id: int) -> Optional[dict]:
+    """Supabase에서 레코드 로드"""
+    global db_pool
+    if not db_pool:
+        raise Exception("DB pool not initialized")
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, created_at, status, form_data, saju_data, error
+            FROM free_saju_records
+            WHERE id = $1
+            """,
+            saju_id
+        )
+
+        if not row:
+            return None
+
+        return {
+            "id": row['id'],
+            "created_at": row['created_at'].isoformat(),
+            "status": row['status'],
+            "form_data": json.loads(row['form_data']),
+            "saju_data": json.loads(row['saju_data']) if row['saju_data'] else None,
+            "error": row['error']
+        }
+
+
+async def update_saju_status(saju_id: int, status: str, saju_data: Optional[dict] = None, error: Optional[str] = None):
+    """Supabase에서 사주 상태 업데이트"""
+    global db_pool
+    if not db_pool:
+        raise Exception("DB pool not initialized")
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE free_saju_records
+            SET status = $1, saju_data = $2, error = $3
+            WHERE id = $4
+            """,
+            status,
+            json.dumps(saju_data) if saju_data else None,
+            error,
+            saju_id
+        )
+        print(f"[OK] Updated status to '{status}': ID={saju_id}")
+
+
+async def call_manseryuk_api(
+    name: str,
+    year: int,
+    month: int,
+    day: int,
+    hour: Optional[int],
+    minute: Optional[int],
+    gender: str,
+    is_lunar: bool,
+    mbti: Optional[str],
+    birth_place: Optional[str]
+) -> dict:
+    """만세력 API 호출하여 사주 데이터 계산"""
+
+    payload = {
+        "name": name,
+        "year": year,
+        "month": month,
+        "day": day,
+        "hour": hour,
+        "minute": minute,
+        "gender": gender,
+        "is_lunar": is_lunar,
+        "mbti": mbti,
+        "birth_place": birth_place or "미상"
+    }
+
+    print(f"[INFO] 만세력 API 호출 시작: {name}, {year}-{month}-{day}")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            MANSERYUK_API_URL,
+            json=payload
+        )
+        response.raise_for_status()
+
+        print(f"[OK] 만세력 API 호출 성공: {response.status_code}")
+        return response.json()
+
+
+async def process_saju_calculation(saju_id: int, form_data: dict):
+    """백그라운드에서 만세력 API 호출 및 DB 업데이트"""
+    try:
+        print(f"[BG] 사주 계산 시작: {saju_id}")
+
+        # 1. 만세력 API 호출 (0.6~3.5초 소요)
+        manseryuk_response = await call_manseryuk_api(
+            name=form_data["name"],
+            year=form_data["birth_year"],
+            month=form_data["birth_month"],
+            day=form_data["birth_day"],
+            hour=form_data.get("birth_hour"),
+            minute=form_data.get("birth_minute"),
+            gender=form_data["gender"],
+            is_lunar=form_data.get("is_lunar", False),
+            mbti=form_data.get("mbti"),
+            birth_place=form_data.get("birth_place", "미상")
+        )
+
+        # 2. enrichment 데이터 추출
+        saju_data = manseryuk_response.get("enrichment")
+        if not saju_data:
+            raise ValueError("enrichment 데이터가 없습니다")
+
+        # 3. DB 업데이트 (status: "completed")
+        await update_saju_status(saju_id, "completed", saju_data=saju_data)
+        print(f"[BG] 사주 계산 완료: {saju_id}")
+
+    except Exception as e:
+        # 4. 에러 발생 시 상태 업데이트
+        await update_saju_status(saju_id, "error", error=str(e))
+        print(f"[ERROR] 만세력 API 호출 실패: {saju_id}, {e}")
+
+
 # ============ 요청/응답 모델 ============
 
 class FirstImpressionRequest(BaseModel):
@@ -227,6 +420,29 @@ class SectionRequest(BaseModel):
     section_name: str  # "first-impression", "강점", "yearly", "재물운", "진로운", "성격", "연애운", "하반기경고"
     user_name: str = "사용자"
     saju_data: Optional[dict] = None
+
+
+class FreeSajuCreateRequest(BaseModel):
+    """무료 사주 생성 요청 (비동기 만세력 API 통합)"""
+    session_id: Optional[str] = None
+    name: str
+    phone: Optional[str] = None
+    birth_year: int
+    birth_month: int
+    birth_day: int
+    birth_hour: Optional[int] = None
+    birth_minute: Optional[int] = None
+    gender: str  # "male" or "female"
+    is_lunar: bool = False
+    mbti: Optional[str] = None
+    birth_place: Optional[str] = "미상"
+    # UTM 파라미터
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_term: Optional[str] = None
+    utm_content: Optional[str] = None
+    referred_share_id: Optional[str] = None
 
 
 class ApiResponse(BaseModel):
@@ -461,6 +677,74 @@ async def get_section_stream(request: SectionRequest):
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
 
     return EventSourceResponse(event_generator())
+
+
+@app.post("/api/v1/free-saju/create")
+async def create_free_saju(
+    request: FreeSajuCreateRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    무료 사주 생성 (비동기 방식 - Supabase + 순차 ID)
+    - 폼 데이터만 저장하고 즉시 ID 반환 (0.1초)
+    - 백그라운드에서 만세력 API 호출 시작
+    """
+    print(f"\n{'='*60}")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] /free-saju/create 호출")
+    print(f"  - name: {request.name}")
+    print(f"  - birth: {request.birth_year}-{request.birth_month}-{request.birth_day}")
+    print('='*60)
+
+    # 1. Supabase에 저장 (순차 ID 자동 생성)
+    saju_id = await save_to_db(request.dict())
+    print(f"[OK] ID 생성 (SERIAL): {saju_id}")
+
+    # 2. 백그라운드 태스크로 만세력 API 호출
+    background_tasks.add_task(
+        process_saju_calculation,
+        saju_id=saju_id,
+        form_data=request.dict()
+    )
+    print(f"[OK] 백그라운드 태스크 등록: {saju_id}")
+
+    # 3. 즉시 응답 반환 (0.1초 이내)
+    return {
+        "id": saju_id,
+        "redirect_url": f"/result/saju/{saju_id}"
+    }
+
+
+@app.get("/api/v1/free-saju/{saju_id}")
+async def get_free_saju(saju_id: int):
+    """
+    무료 사주 조회 (상태 포함 - Supabase)
+    - processing: 계산 중
+    - completed: 계산 완료
+    - error: 에러 발생
+    """
+    print(f"[INFO] GET /free-saju/{saju_id}")
+
+    # 1. Supabase에서 조회
+    record = await load_from_db(saju_id)
+
+    # 2. 존재하지 않으면 404
+    if not record:
+        raise HTTPException(status_code=404, detail="사주 데이터를 찾을 수 없습니다")
+
+    # 3. 응답 반환 (status에 따라 다른 데이터)
+    response = {
+        "id": record["id"],
+        "status": record["status"],
+        "created_at": record["created_at"],
+        "user_name": record["form_data"]["name"],
+        "saju_data": record.get("saju_data")
+    }
+
+    if record["status"] == "error":
+        response["error"] = record.get("error", "알 수 없는 오류")
+
+    print(f"[OK] 상태 응답: {record['status']}")
+    return response
 
 
 if __name__ == "__main__":
