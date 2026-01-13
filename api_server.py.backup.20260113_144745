@@ -158,9 +158,6 @@ def load_prompts_by_variant(variant: Optional[str] = None):
         if variant == "v4.0":
             yaml_path = BASE_DIR / "prompts" / "v10.0_v4.0.yaml"
             print(f"[{timestamp}] ✅ v4.0 variant selected (소프트 유도)")
-        elif variant == "v4.0.1":
-            yaml_path = BASE_DIR / "prompts" / "v10.0_v4.0.1.yaml"
-            print(f"[{timestamp}] ✅ v4.0.1 variant selected (채팅 UX 최적화)")
         elif variant == "v4.1":
             yaml_path = BASE_DIR / "prompts" / "v10.0_v4.1.yaml"
             print(f"[{timestamp}] ✅ v4.1 variant selected (빠른 후킹)")
@@ -742,7 +739,6 @@ async def get_section_stream(request: SectionRequest):
     return EventSourceResponse(event_generator())
 
 
-@app.post("/free-saju/create")  # v3.0 호환 별칭
 @app.post("/api/v1/free-saju/create")
 async def create_free_saju(
     request: FreeSajuCreateRequest,
