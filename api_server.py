@@ -735,14 +735,9 @@ async def get_section_stream(request: SectionRequest):
                 except StopIteration:
                     break
 
-            # done 이벤트에 파싱된 파트 배열 포함
-            parts = parse_v8_response(full_text)
-            yield {"event": "message", "data": json.dumps({
-                "done": True,
-                "full_text": full_text,
-                "parts": parts
-            })}
-            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 섹션 스트리밍 완료: {request.section_name} ({len(parts)} parts)")
+            # done 이벤트 단순화 (클라이언트에서 buffer로 파싱)
+            yield {"event": "message", "data": json.dumps({"done": True})}
+            print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 섹션 스트리밍 완료: {request.section_name} ({len(full_text)}자)")
         except Exception as e:
             print(f"[ERROR] 섹션 스트리밍 실패 ({request.section_name}): {str(e)}")
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
