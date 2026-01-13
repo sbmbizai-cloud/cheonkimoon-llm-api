@@ -739,6 +739,7 @@ async def get_section_stream(request: SectionRequest):
     return EventSourceResponse(event_generator())
 
 
+@app.post("/free-saju/create")  # v3.0 호환 별칭
 @app.post("/api/v1/free-saju/create")
 async def create_free_saju(
     request: FreeSajuCreateRequest,
