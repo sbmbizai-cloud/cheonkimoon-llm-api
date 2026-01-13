@@ -88,19 +88,20 @@ STORAGE_DIR.mkdir(exist_ok=True)
 # 만세력 API URL
 MANSERYUK_API_URL = "https://api.cheongimun.com/api/v1/manseryuk/calculate-enriched"
 
-# 기본 테스트 데이터 로드
+# 기본 테스트 데이터 로드 (비활성화 - 실제 데이터만 사용)
 DEFAULT_SAJU_DATA = None
-DEFAULT_USER_NAME = None
-try:
-    default_file = SAJU_DATA_DIR / "default.json"
-    if default_file.exists():
-        with open(default_file, "r", encoding="utf-8") as f:
-            DEFAULT_SAJU_DATA = json.load(f)
-        DEFAULT_USER_NAME = DEFAULT_SAJU_DATA.get("meta", {}).get("이름", "테스트")
-        print(f"[OK] Default saju data loaded: {DEFAULT_USER_NAME}")
-except Exception as e:
-    print(f"[WARN] Default saju data load failed: {e}")
-    DEFAULT_USER_NAME = "테스트"
+DEFAULT_USER_NAME = "테스트"
+# try:
+#     default_file = SAJU_DATA_DIR / "default.json"
+#     if default_file.exists():
+#         with open(default_file, "r", encoding="utf-8") as f:
+#             DEFAULT_SAJU_DATA = json.load(f)
+#         DEFAULT_USER_NAME = DEFAULT_SAJU_DATA.get("meta", {}).get("이름", "테스트")
+#         print(f"[OK] Default saju data loaded: {DEFAULT_USER_NAME}")
+# except Exception as e:
+#     print(f"[WARN] Default saju data load failed: {e}")
+#     DEFAULT_USER_NAME = "테스트"
+print("[INFO] Default saju data disabled - using request data only")
 
 # v9.1 프롬프트 경로 (배포용 - prompts 폴더)
 V9_PROMPT_PATH = BASE_DIR / "prompts" / "v9.1_with_buttons.yaml"
@@ -491,9 +492,12 @@ async def get_full_reading_stream(request: FullReadingRequest):
     if not unified_prompt:
         raise HTTPException(status_code=500, detail="unified_prompt not found in yaml")
 
-    # 사주 데이터 결정
-    saju_data = request.saju_data if request.saju_data else DEFAULT_SAJU_DATA
-    user_name = request.user_name if request.user_name != "사용자" else DEFAULT_USER_NAME
+    # 사주 데이터 검증 (더미 데이터 사용 안 함)
+    if not request.saju_data:
+        raise HTTPException(status_code=400, detail="saju_data is required")
+
+    saju_data = request.saju_data
+    user_name = request.user_name if request.user_name and request.user_name != "사용자" else DEFAULT_USER_NAME
 
     # 변수 추출
     variables = get_template_variables(saju_data, user_name)
@@ -537,8 +541,12 @@ async def get_first_impression_stream(request: FirstImpressionRequest):
     if not v8_prompts:
         raise HTTPException(status_code=500, detail="v9.1 prompts not loaded")
 
-    saju_data = request.saju_data if request.saju_data else DEFAULT_SAJU_DATA
-    user_name = request.user_name if request.user_name != "사용자" else DEFAULT_USER_NAME
+    # 사주 데이터 검증 (더미 데이터 사용 안 함)
+    if not request.saju_data:
+        raise HTTPException(status_code=400, detail="saju_data is required")
+
+    saju_data = request.saju_data
+    user_name = request.user_name if request.user_name and request.user_name != "사용자" else DEFAULT_USER_NAME
 
     step_prompt = v8_prompts.get("step_prompts", {}).get("step_2_first_impression", {})
     if not step_prompt:
@@ -581,8 +589,12 @@ async def get_step_stream(request: StepRequest):
     if not v8_prompts:
         raise HTTPException(status_code=500, detail="v9.1 prompts not loaded")
 
-    saju_data = request.saju_data if request.saju_data else DEFAULT_SAJU_DATA
-    user_name = request.user_name if request.user_name != "사용자" else DEFAULT_USER_NAME
+    # 사주 데이터 검증 (더미 데이터 사용 안 함)
+    if not request.saju_data:
+        raise HTTPException(status_code=400, detail="saju_data is required")
+
+    saju_data = request.saju_data
+    user_name = request.user_name if request.user_name and request.user_name != "사용자" else DEFAULT_USER_NAME
 
     step_prompt = v8_prompts.get("step_prompts", {}).get(request.step_name, {})
     if not step_prompt:
@@ -635,9 +647,12 @@ async def get_section_stream(request: SectionRequest):
     if not section_prompt:
         raise HTTPException(status_code=404, detail=f"section not found: {request.section_name}")
 
-    # 사주 데이터 결정
-    saju_data = request.saju_data if request.saju_data else DEFAULT_SAJU_DATA
-    user_name = request.user_name if request.user_name != "사용자" else DEFAULT_USER_NAME
+    # 사주 데이터 검증 (더미 데이터 사용 안 함)
+    if not request.saju_data:
+        raise HTTPException(status_code=400, detail="saju_data is required")
+
+    saju_data = request.saju_data
+    user_name = request.user_name if request.user_name and request.user_name != "사용자" else DEFAULT_USER_NAME
 
     # 변수 추출
     variables = get_template_variables(saju_data, user_name)
