@@ -165,9 +165,9 @@ def load_prompts_by_variant(variant: Optional[str] = None):
             yaml_path = BASE_DIR / "prompts" / "v10.0_v4.1.yaml"
             print(f"[{timestamp}] ✅ v4.1 variant selected (빠른 후킹)")
         else:
-            # None 또는 기타 값이면 기본 v3.0 (v10.2_parallel.yaml)
-            yaml_path = V10_PROMPT_PATH
-            print(f"[{timestamp}] ✅ v3.0 variant selected (기본)")
+            # None 또는 기타 값이면 기본 v4.0.1 (채팅 UX 최적화)
+            yaml_path = BASE_DIR / "prompts" / "v10.0_v4.0.1.yaml"
+            print(f"[{timestamp}] ✅ v4.0.1 variant selected (기본 - 채팅 UX 최적화)")
 
         # 파일 존재 확인 및 로드
         if yaml_path.exists():
