@@ -976,16 +976,28 @@ async def section_stream_v5(request: SectionStreamRequest):
     - 첫 토큰 ~0.5초 내 표시 (Riido: 35초 → 0.8초 달성)
     - Part 2+ 실시간 타이핑으로 "멈춤" 느낌 해소
     """
-    print(f"\n[V2.5] === /api/v2/section-stream-v5 ===")
-    print(f"[V2.5] Section: {request.section_name}, User: {request.user_name}")
+    print(f"\n{'='*70}")
+    print(f"[V2.5 DEBUG] 📥 Request received")
+    print(f"[V2.5 DEBUG]   Section: {request.section_name}")
+    print(f"[V2.5 DEBUG]   User: {request.user_name}")
+    print(f"[V2.5 DEBUG]   Saju data keys: {list(request.saju_data.keys()) if request.saju_data else 'None'}")
+    print(f"{'='*70}")
 
+    # 1️⃣ 사주 데이터 검증
     if not request.saju_data:
+        print(f"[V2.5 DEBUG] ❌ ERROR: saju_data is missing")
         raise HTTPException(status_code=400, detail="saju_data is required")
+    print(f"[V2.5 DEBUG] ✅ Saju data validated")
 
+    # 2️⃣ 프롬프트 로드
+    print(f"[V2.5 DEBUG] 📂 Loading v10.2 prompts...")
     prompts = load_v10_prompts()
     if not prompts:
+        print(f"[V2.5 DEBUG] ❌ ERROR: Prompts failed to load")
         raise HTTPException(status_code=500, detail="Prompts not loaded")
+    print(f"[V2.5 DEBUG] ✅ Prompts loaded, keys: {list(prompts.keys())}")
 
+    # 3️⃣ 섹션 매핑
     section_map = {
         "first-impression": "first-impression",
         "strength": "강점", "강점": "강점",
@@ -998,19 +1010,35 @@ async def section_stream_v5(request: SectionStreamRequest):
     }
 
     section_key = section_map.get(request.section_name, request.section_name)
-    section_prompts = prompts.get("section_prompts", {}).get(section_key)
+    print(f"[V2.5 DEBUG] 🔑 Section mapping: '{request.section_name}' → '{section_key}'")
 
+    # 4️⃣ 섹션 프롬프트 확인
+    section_prompts_dict = prompts.get("section_prompts", {})
+    print(f"[V2.5 DEBUG] 📋 Available sections: {list(section_prompts_dict.keys())}")
+
+    section_prompts = section_prompts_dict.get(section_key)
     if not section_prompts:
+        print(f"[V2.5 DEBUG] ❌ ERROR: Section '{section_key}' not found in prompts")
         raise HTTPException(status_code=400, detail=f"Unknown section: {request.section_name}")
+    print(f"[V2.5 DEBUG] ✅ Section prompts found: system={bool(section_prompts.get('system'))}, user_template={bool(section_prompts.get('user_template'))}")
 
+    # 5️⃣ 변수 추출
+    print(f"[V2.5 DEBUG] 🔧 Extracting template variables...")
     variables = get_template_variables(request.saju_data, request.user_name)
+    print(f"[V2.5 DEBUG] ✅ Variables extracted: name={variables.get('name')}, ilgan={variables.get('ilgan')}")
 
+    # 6️⃣ 프롬프트 준비
+    print(f"[V2.5 DEBUG] 📝 Preparing prompts...")
     common_system = prompts.get("common_system", "")
     common_data_template = prompts.get("common_data_template", "")
 
     system_prompt = section_prompts.get("system", "").replace("{common_system}", common_system)
     user_template = section_prompts.get("user_template", "").replace("{common_data_template}", common_data_template)
     user_message = render_template(user_template, variables)
+
+    print(f"[V2.5 DEBUG] ✅ Prompts ready:")
+    print(f"[V2.5 DEBUG]   System prompt: {len(system_prompt)} chars")
+    print(f"[V2.5 DEBUG]   User message: {len(user_message)} chars")
 
     async def generate():
         """
@@ -1020,6 +1048,8 @@ async def section_stream_v5(request: SectionStreamRequest):
         2. '---' 감지 시 event: part 전송
         """
         try:
+            # 7️⃣ 스트리밍 시작
+            print(f"[V2.5 DEBUG] 🚀 Starting LLM streaming...")
             buffer = ""
             part_index = 0
             token_count = 0
@@ -1034,7 +1064,8 @@ async def section_stream_v5(request: SectionStreamRequest):
                 # 첫 토큰 시간 기록
                 if first_token_time is None:
                     first_token_time = time.time() - start_time
-                    print(f"[V2.5] ⚡ 첫 토큰: {first_token_time:.2f}초")
+                    print(f"[V2.5 DEBUG] ⚡ First token received: {first_token_time:.2f}s (token #{token_count})")
+                    print(f"[V2.5 DEBUG] 📤 Starting token stream to client...")
 
                 # ★ 토큰마다 실시간 전송 (핵심!)
                 yield {
@@ -1094,9 +1125,15 @@ async def section_stream_v5(request: SectionStreamRequest):
                     }
                     part_index += 1
 
-            # 완료 이벤트
+            # 8️⃣ 완료 이벤트
             total_time = time.time() - start_time
-            print(f"[V2.5] ✅ 완료: {part_index} parts, {token_count} tokens, {total_time:.2f}초")
+            print(f"[V2.5 DEBUG] {'='*70}")
+            print(f"[V2.5 DEBUG] ✅ Streaming completed successfully!")
+            print(f"[V2.5 DEBUG]   Total parts: {part_index}")
+            print(f"[V2.5 DEBUG]   Total tokens: {token_count}")
+            print(f"[V2.5 DEBUG]   First token time: {first_token_time:.2f}s")
+            print(f"[V2.5 DEBUG]   Total time: {total_time:.2f}s")
+            print(f"[V2.5 DEBUG] {'='*70}")
             yield {
                 "event": "done",
                 "data": json.dumps({
@@ -1108,7 +1145,14 @@ async def section_stream_v5(request: SectionStreamRequest):
             }
 
         except Exception as e:
-            print(f"[V2.5] ❌ Error: {e}")
+            # 9️⃣ 에러 발생
+            print(f"[V2.5 DEBUG] {'='*70}")
+            print(f"[V2.5 DEBUG] ❌ ERROR during streaming!")
+            print(f"[V2.5 DEBUG]   Error type: {type(e).__name__}")
+            print(f"[V2.5 DEBUG]   Error message: {str(e)}")
+            print(f"[V2.5 DEBUG]   Tokens streamed before error: {token_count}")
+            print(f"[V2.5 DEBUG]   Parts completed before error: {part_index}")
+            print(f"[V2.5 DEBUG] {'='*70}")
             import traceback
             traceback.print_exc()
             yield {"event": "error", "data": json.dumps({"error": str(e)}, ensure_ascii=False)}
