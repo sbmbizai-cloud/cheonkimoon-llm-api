@@ -55,6 +55,28 @@ db_pool: Optional[asyncpg.Pool] = None
 # 스트림 세션 저장소 (EventSource용 2단계 방식)
 stream_sessions: dict = {}
 
+# ═══════════════════════════════════════════════════════════
+# 스트리밍 Helper 함수
+# ═══════════════════════════════════════════════════════════
+
+_STREAM_END = object()  # Sentinel value for safe iteration
+
+def safe_next(iterator):
+    """
+    StopIteration을 안전하게 처리하는 next() wrapper
+
+    async generator에서 run_in_executor()로 next()를 호출할 때
+    StopIteration이 Future로 전파되어 에러가 발생하는 것을 방지
+
+    Returns:
+        - iterator의 다음 값
+        - iterator가 끝나면 _STREAM_END sentinel 반환
+    """
+    try:
+        return next(iterator)
+    except StopIteration:
+        return _STREAM_END
+
 # 서버 시작/종료 이벤트
 @app.on_event("startup")
 async def startup():
@@ -475,7 +497,7 @@ class SectionStreamRequest(BaseModel):
     """섹션 스트리밍 요청 (V2.5 하이브리드)"""
     section_name: str  # "first-impression", "강점", "yearly", etc.
     user_name: str = "사용자"
-    saju_data: dict  # 필수! (더미 데이터 없음)
+    saju_data: dict  # 필수
 
 
 class FreeSajuCreateRequest(BaseModel):
@@ -546,7 +568,7 @@ async def get_full_reading_stream(request: FullReadingRequest):
     if not unified_prompt:
         raise HTTPException(status_code=500, detail="unified_prompt not found in yaml")
 
-    # 사주 데이터 검증 (더미 데이터 사용 안 함)
+    # 사주 데이터 검증
     if not request.saju_data:
         raise HTTPException(status_code=400, detail="saju_data is required")
 
@@ -571,11 +593,12 @@ async def get_full_reading_stream(request: FullReadingRequest):
             stream_iter = iter(llm_client.stream(system_prompt, user_message))
 
             while True:
-                try:
-                    chunk = await loop.run_in_executor(None, next, stream_iter)
-                    yield {"event": "message", "data": json.dumps({"token": chunk})}
-                except StopIteration:
+                chunk = await loop.run_in_executor(None, safe_next, stream_iter)
+
+                if chunk is _STREAM_END:
                     break
+
+                yield {"event": "message", "data": json.dumps({"token": chunk})}
 
             yield {"event": "message", "data": json.dumps({"done": True})}
             print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 스트리밍 완료")
@@ -595,7 +618,7 @@ async def get_first_impression_stream(request: FirstImpressionRequest):
     if not v8_prompts:
         raise HTTPException(status_code=500, detail="v9.1 prompts not loaded")
 
-    # 사주 데이터 검증 (더미 데이터 사용 안 함)
+    # 사주 데이터 검증
     if not request.saju_data:
         raise HTTPException(status_code=400, detail="saju_data is required")
 
@@ -621,11 +644,12 @@ async def get_first_impression_stream(request: FirstImpressionRequest):
             stream_iter = iter(llm_client.stream(system_prompt, user_message))
 
             while True:
-                try:
-                    chunk = await loop.run_in_executor(None, next, stream_iter)
-                    yield {"event": "message", "data": json.dumps({"token": chunk})}
-                except StopIteration:
+                chunk = await loop.run_in_executor(None, safe_next, stream_iter)
+
+                if chunk is _STREAM_END:
                     break
+
+                yield {"event": "message", "data": json.dumps({"token": chunk})}
 
             yield {"event": "message", "data": json.dumps({"done": True})}
         except Exception as e:
@@ -643,7 +667,7 @@ async def get_step_stream(request: StepRequest):
     if not v8_prompts:
         raise HTTPException(status_code=500, detail="v9.1 prompts not loaded")
 
-    # 사주 데이터 검증 (더미 데이터 사용 안 함)
+    # 사주 데이터 검증
     if not request.saju_data:
         raise HTTPException(status_code=400, detail="saju_data is required")
 
@@ -669,11 +693,12 @@ async def get_step_stream(request: StepRequest):
             stream_iter = iter(llm_client.stream(system_prompt, user_message))
 
             while True:
-                try:
-                    chunk = await loop.run_in_executor(None, next, stream_iter)
-                    yield {"event": "message", "data": json.dumps({"token": chunk})}
-                except StopIteration:
+                chunk = await loop.run_in_executor(None, safe_next, stream_iter)
+
+                if chunk is _STREAM_END:
                     break
+
+                yield {"event": "message", "data": json.dumps({"token": chunk})}
 
             yield {"event": "message", "data": json.dumps({"done": True})}
         except Exception as e:
@@ -767,12 +792,13 @@ async def stream_section_by_id(stream_id: str):
             stream_iter = iter(llm_client.stream(system_prompt, user_message))
 
             while True:
-                try:
-                    chunk = await loop.run_in_executor(None, next, stream_iter)
-                    # event: token 으로 명확한 이벤트 타입 지정
-                    yield {"event": "token", "data": json.dumps({"text": chunk})}
-                except StopIteration:
+                chunk = await loop.run_in_executor(None, safe_next, stream_iter)
+
+                if chunk is _STREAM_END:
                     break
+
+                # event: token 으로 명확한 이벤트 타입 지정
+                yield {"event": "token", "data": json.dumps({"text": chunk})}
 
             # 완료 이벤트
             yield {"event": "done", "data": ""}
@@ -810,7 +836,7 @@ async def get_section_stream(request: SectionRequest):
     if not section_prompt:
         raise HTTPException(status_code=404, detail=f"section not found: {request.section_name}")
 
-    # 사주 데이터 검증 (더미 데이터 사용 안 함)
+    # 사주 데이터 검증
     if not request.saju_data:
         raise HTTPException(status_code=400, detail="saju_data is required")
 
@@ -845,12 +871,13 @@ async def get_section_stream(request: SectionRequest):
             stream_iter = iter(llm_client.stream(system_prompt, user_message))
 
             while True:
-                try:
-                    chunk = await loop.run_in_executor(None, next, stream_iter)
-                    full_text += chunk  # 텍스트 수집
-                    yield {"event": "message", "data": json.dumps({"token": chunk})}
-                except StopIteration:
+                chunk = await loop.run_in_executor(None, safe_next, stream_iter)
+
+                if chunk is _STREAM_END:
                     break
+
+                full_text += chunk  # 텍스트 수집
+                yield {"event": "message", "data": json.dumps({"token": chunk})}
 
             # done 이벤트 단순화 (클라이언트에서 buffer로 파싱)
             yield {"event": "message", "data": json.dumps({"done": True})}
