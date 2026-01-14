@@ -402,6 +402,7 @@ async def call_manseryuk_api(
     birth_place: Optional[str]
 ) -> dict:
     """만세력 API 호출하여 사주 데이터 계산"""
+    import time
 
     payload = {
         "name": name,
@@ -416,7 +417,8 @@ async def call_manseryuk_api(
         "birth_place": birth_place or "미상"
     }
 
-    print(f"[INFO] 만세력 API 호출 시작: {name}, {year}-{month}-{day}")
+    start_time = time.time()
+    print(f"⏱️ [SERVER DEBUG] 📡 만세력 API 호출 시작: {name}, {year}-{month}-{day}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
@@ -425,16 +427,23 @@ async def call_manseryuk_api(
         )
         response.raise_for_status()
 
+        elapsed = time.time() - start_time
+        print(f"⏱️ [SERVER DEBUG] ✅ 만세력 API 호출 완료: {elapsed:.2f}초")
         print(f"[OK] 만세력 API 호출 성공: {response.status_code}")
         return response.json()
 
 
 async def process_saju_calculation(saju_id: int, form_data: dict):
     """백그라운드에서 만세력 API 호출 및 DB 업데이트"""
+    import time
+    total_start_time = time.time()
+
     try:
+        print(f"⏱️ [SERVER DEBUG] 🔄 사주 계산 프로세스 시작: ID={saju_id}")
         print(f"[BG] 사주 계산 시작: {saju_id}")
 
         # 1. 만세력 API 호출 (0.6~3.5초 소요)
+        api_start_time = time.time()
         manseryuk_response = await call_manseryuk_api(
             name=form_data["name"],
             year=form_data["birth_year"],
@@ -447,14 +456,23 @@ async def process_saju_calculation(saju_id: int, form_data: dict):
             mbti=form_data.get("mbti"),
             birth_place=form_data.get("birth_place", "미상")
         )
+        api_elapsed = time.time() - api_start_time
 
-        # 2. enrichment 데이터 추출
+        # 2. enrichment 데이터 추출 (가공 시작)
+        processing_start_time = time.time()
         saju_data = manseryuk_response.get("enrichment")
         if not saju_data:
             raise ValueError("enrichment 데이터가 없습니다")
+        processing_elapsed = time.time() - processing_start_time
 
         # 3. DB 업데이트 (status: "completed")
         await update_saju_status(saju_id, "completed", saju_data=saju_data)
+
+        total_elapsed = time.time() - total_start_time
+        print(f"⏱️ [SERVER DEBUG] 🎉 사주 계산 프로세스 완료!")
+        print(f"⏱️ [SERVER DEBUG]   - 만세력 API: {api_elapsed:.2f}초")
+        print(f"⏱️ [SERVER DEBUG]   - 데이터 가공: {processing_elapsed:.3f}초")
+        print(f"⏱️ [SERVER DEBUG]   - 전체 소요: {total_elapsed:.2f}초")
         print(f"[BG] 사주 계산 완료: {saju_id}")
 
     except Exception as e:
@@ -1029,6 +1047,9 @@ async def section_stream_v5(request: SectionStreamRequest):
     print(f"[V2.5 DEBUG] ✅ Variables extracted: name={variables.get('name')}, ilgan={variables.get('ilgan')}")
 
     # 6️⃣ 프롬프트 준비
+    import time
+    prompt_prep_start = time.time()
+    print(f"⏱️ [SERVER DEBUG] 📝 LLM 프롬프트 준비 시작")
     print(f"[V2.5 DEBUG] 📝 Preparing prompts...")
     common_system = prompts.get("common_system", "")
     common_data_template = prompts.get("common_data_template", "")
@@ -1037,6 +1058,8 @@ async def section_stream_v5(request: SectionStreamRequest):
     user_template = section_prompts.get("user_template", "").replace("{common_data_template}", common_data_template)
     user_message = render_template(user_template, variables)
 
+    prompt_prep_elapsed = time.time() - prompt_prep_start
+    print(f"⏱️ [SERVER DEBUG] ✅ LLM 프롬프트 준비 완료: {prompt_prep_elapsed:.3f}초")
     print(f"[V2.5 DEBUG] ✅ Prompts ready:")
     print(f"[V2.5 DEBUG]   System prompt: {len(system_prompt)} chars")
     print(f"[V2.5 DEBUG]   User message: {len(user_message)} chars")
@@ -1050,13 +1073,14 @@ async def section_stream_v5(request: SectionStreamRequest):
         """
         try:
             # 7️⃣ 스트리밍 시작
+            import time
+            start_time = time.time()
+            print(f"⏱️ [SERVER DEBUG] 🚀 LLM 스트리밍 시작 (Claude API 호출)")
             print(f"[V2.5 DEBUG] 🚀 Starting LLM streaming...")
             buffer = ""
             part_index = 0
             token_count = 0
             first_token_time = None
-            import time
-            start_time = time.time()
 
             for chunk in llm_client.stream(system_prompt, user_message):
                 buffer += chunk
@@ -1065,6 +1089,7 @@ async def section_stream_v5(request: SectionStreamRequest):
                 # 첫 토큰 시간 기록
                 if first_token_time is None:
                     first_token_time = time.time() - start_time
+                    print(f"⏱️ [SERVER DEBUG] ⚡ LLM 첫 토큰 생성: {first_token_time:.2f}초")
                     print(f"[V2.5 DEBUG] ⚡ First token received: {first_token_time:.2f}s (token #{token_count})")
                     print(f"[V2.5 DEBUG] 📤 Starting token stream to client...")
 
