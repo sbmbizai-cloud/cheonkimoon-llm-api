@@ -927,6 +927,7 @@ async def create_free_saju(
 
 @app.get("/free-saju/{saju_id}")  # v3.0 호환 별칭
 @app.get("/api/v1/free-saju/{saju_id}")
+@app.get("/api/v2/free-saju/{saju_id}")  # V2 별칭 (Framer v4.0_v2 호환)
 async def get_free_saju(saju_id: int):
     """
     무료 사주 조회 (상태 포함 - Supabase)
