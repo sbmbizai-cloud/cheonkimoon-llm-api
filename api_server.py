@@ -147,22 +147,22 @@ def load_v8_prompts():
     return None
 
 
-# v10.2 프롬프트 경로 (배포용 - prompts 폴더)
-V10_PROMPT_PATH = BASE_DIR / "prompts" / "v10.2_parallel.yaml"
+# v10.0_v4.0.1 프롬프트 경로 (배포용 - prompts 폴더)
+V10_PROMPT_PATH = BASE_DIR / "prompts" / "v10.0_v4.0.1.yaml"
 
 
 def load_v10_prompts():
-    """v10.0 프롬프트 실시간 로드 (yaml 수정 즉시 반영)"""
+    """v10.0_v4.0.1 프롬프트 실시간 로드 (yaml 수정 즉시 반영)"""
     try:
         if V10_PROMPT_PATH.exists():
             with open(V10_PROMPT_PATH, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
                 import datetime
                 timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-                print(f"[{timestamp}] v10.0 prompts loaded from disk")
+                print(f"[{timestamp}] v10.0_v4.0.1 prompts loaded from disk")
                 return data
     except Exception as e:
-        print(f"[WARN] v10.0 prompts load failed: {e}")
+        print(f"[WARN] v10.0_v4.0.1 prompts load failed: {e}")
     return None
 
 
@@ -216,9 +216,9 @@ else:
     print(f"[WARN] v9.1 prompts file not found at {V9_PROMPT_PATH}")
 
 if V10_PROMPT_PATH.exists():
-    print("[OK] v10.0 prompts file found (will load on each request)")
+    print("[OK] v10.0_v4.0.1 prompts file found (will load on each request)")
 else:
-    print(f"[WARN] v10.0 prompts file not found at {V10_PROMPT_PATH}")
+    print(f"[WARN] v10.0_v4.0.1 prompts file not found at {V10_PROMPT_PATH}")
 
 
 # ============ v8 헬퍼 함수 ============
@@ -1009,7 +1009,7 @@ async def section_stream_v5(request: SectionStreamRequest):
     print(f"[V2.5 DEBUG] ✅ Saju data validated")
 
     # 2️⃣ 프롬프트 로드
-    print(f"[V2.5 DEBUG] 📂 Loading v10.2 prompts...")
+    print(f"[V2.5 DEBUG] 📂 Loading v10.0_v4.0.1 prompts...")
     prompts = load_v10_prompts()
     if not prompts:
         print(f"[V2.5 DEBUG] ❌ ERROR: Prompts failed to load")
