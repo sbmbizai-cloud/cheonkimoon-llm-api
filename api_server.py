@@ -52,6 +52,9 @@ app.add_middleware(
 llm_client = LLMClient()
 db_pool: Optional[asyncpg.Pool] = None
 
+# 스트림 세션 저장소 (EventSource용 2단계 방식)
+stream_sessions: dict = {}
+
 # 서버 시작/종료 이벤트
 @app.on_event("startup")
 async def startup():
@@ -671,6 +674,113 @@ async def get_step_stream(request: StepRequest):
 
     return EventSourceResponse(event_generator())
 
+
+# ╔════════════════════════════════════════════════════════════════╗
+# ║  EventSource 2단계 방식 - 안정적인 SSE 스트리밍                   ║
+# ╚════════════════════════════════════════════════════════════════╝
+
+@app.post("/section-start")
+@app.post("/api/v1/section-start")
+async def start_section_stream(request: SectionRequest):
+    """
+    스트림 세션 생성 (EventSource용 2단계 방식 - 1단계)
+    - 파라미터를 저장하고 stream_id 반환
+    - 클라이언트는 이 ID로 GET /section-stream/{id} 호출
+    """
+    import uuid
+    import datetime as dt
+
+    stream_id = str(uuid.uuid4())[:8]
+
+    # variant에 따라 프롬프트 로드
+    v10_prompts = load_prompts_by_variant(request.variant)
+    if not v10_prompts:
+        raise HTTPException(status_code=500, detail="prompts not loaded")
+
+    section_prompt = v10_prompts.get("section_prompts", {}).get(request.section_name, {})
+    if not section_prompt:
+        raise HTTPException(status_code=404, detail=f"section not found: {request.section_name}")
+
+    if not request.saju_data:
+        raise HTTPException(status_code=400, detail="saju_data is required")
+
+    saju_data = request.saju_data
+    user_name = request.user_name if request.user_name and request.user_name != "사용자" else DEFAULT_USER_NAME
+
+    # 변수 추출 및 프롬프트 렌더링
+    variables = get_template_variables(saju_data, user_name)
+    timestamp = dt.datetime.now().isoformat()
+
+    common_system = v10_prompts.get("common_system", "")
+    section_system = section_prompt.get("system", "")
+    system_prompt = section_system.replace("{common_system}", common_system)
+    system_prompt = f"{system_prompt}\n\n[Internal timestamp: {timestamp}]"
+
+    common_data = v10_prompts.get("common_data_template", "")
+    section_user = section_prompt.get("user_template", "")
+    user_message = section_user.replace("{common_data_template}", common_data)
+    user_message = render_template(user_message, variables)
+
+    # 세션 저장
+    stream_sessions[stream_id] = {
+        "section_name": request.section_name,
+        "system_prompt": system_prompt,
+        "user_message": user_message,
+        "created_at": dt.datetime.now()
+    }
+
+    print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] 스트림 세션 생성: {stream_id} ({request.section_name})")
+
+    return {"stream_id": stream_id}
+
+
+@app.get("/section-stream/{stream_id}")
+@app.get("/api/v1/section-stream/{stream_id}")
+async def stream_section_by_id(stream_id: str):
+    """
+    EventSource용 SSE 스트림 (2단계 방식 - 2단계)
+    - stream_id로 세션 조회 후 LLM 스트리밍
+    - 브라우저 EventSource API와 완벽 호환
+    """
+    import datetime as dt
+
+    if stream_id not in stream_sessions:
+        raise HTTPException(status_code=404, detail="Stream session not found or expired")
+
+    session = stream_sessions.pop(stream_id)  # 1회용 세션 삭제
+    section_name = session["section_name"]
+    system_prompt = session["system_prompt"]
+    user_message = session["user_message"]
+
+    print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] EventSource 스트리밍 시작: {stream_id} ({section_name})")
+
+    async def event_generator():
+        try:
+            loop = asyncio.get_event_loop()
+            stream_iter = iter(llm_client.stream(system_prompt, user_message))
+
+            while True:
+                try:
+                    chunk = await loop.run_in_executor(None, next, stream_iter)
+                    # event: token 으로 명확한 이벤트 타입 지정
+                    yield {"event": "token", "data": json.dumps({"text": chunk})}
+                except StopIteration:
+                    break
+
+            # 완료 이벤트
+            yield {"event": "done", "data": ""}
+            print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] EventSource 스트리밍 완료: {stream_id}")
+
+        except Exception as e:
+            print(f"[ERROR] EventSource 스트리밍 실패 ({stream_id}): {str(e)}")
+            yield {"event": "error", "data": json.dumps({"error": str(e)})}
+
+    return EventSourceResponse(event_generator())
+
+
+# ╔════════════════════════════════════════════════════════════════╗
+# ║  기존 POST 방식 (하위 호환성 유지)                               ║
+# ╚════════════════════════════════════════════════════════════════╝
 
 @app.post("/section-stream")
 @app.post("/api/v1/section-stream")  # 별칭 추가 (프론트엔드 호환성)
