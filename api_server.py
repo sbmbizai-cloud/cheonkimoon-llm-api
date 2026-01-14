@@ -471,6 +471,13 @@ class SectionRequest(BaseModel):
     variant: Optional[str] = None  # "v4.0" (소프트 유도), "v4.1" (빠른 후킹), None (기본 v3.0)
 
 
+class SectionStreamRequest(BaseModel):
+    """섹션 스트리밍 요청 (V2.5 하이브리드)"""
+    section_name: str  # "first-impression", "강점", "yearly", etc.
+    user_name: str = "사용자"
+    saju_data: dict  # 필수! (더미 데이터 없음)
+
+
 class FreeSajuCreateRequest(BaseModel):
     """무료 사주 생성 요청 (비동기 만세력 API 통합)"""
     session_id: Optional[str] = None
