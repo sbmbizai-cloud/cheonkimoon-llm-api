@@ -982,7 +982,7 @@ async def section_stream_v5(request: SectionStreamRequest):
     if not request.saju_data:
         raise HTTPException(status_code=400, detail="saju_data is required")
 
-    prompts = load_prompts()
+    prompts = load_v10_prompts()
     if not prompts:
         raise HTTPException(status_code=500, detail="Prompts not loaded")
 
