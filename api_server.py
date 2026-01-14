@@ -925,6 +925,169 @@ async def get_free_saju(saju_id: int):
     return response
 
 
+# ═══════════════════════════════════════════════════════════════
+# V2.5 하이브리드 스트리밍 (토큰 실시간 + 파트 완료)
+# Riido 블로그 패턴 적용: https://blog.riido.io/llm-structured-streaming-with-langchain-sse/
+# ═══════════════════════════════════════════════════════════════
+@app.post("/api/v2/section-stream-v5")
+async def section_stream_v5(request: SectionStreamRequest):
+    """
+    V2.5 하이브리드 스트리밍
+
+    핵심 전략:
+    1. 토큰마다 event: token 전송 (실시간 타이핑 효과)
+    2. '---' 감지 시 event: part 전송 (파트 완료, 버튼 활성화)
+
+    이점:
+    - 첫 토큰 ~0.5초 내 표시 (Riido: 35초 → 0.8초 달성)
+    - Part 2+ 실시간 타이핑으로 "멈춤" 느낌 해소
+    """
+    print(f"\n[V2.5] === /api/v2/section-stream-v5 ===")
+    print(f"[V2.5] Section: {request.section_name}, User: {request.user_name}")
+
+    if not request.saju_data:
+        raise HTTPException(status_code=400, detail="saju_data is required")
+
+    prompts = load_prompts()
+    if not prompts:
+        raise HTTPException(status_code=500, detail="Prompts not loaded")
+
+    section_map = {
+        "first-impression": "first-impression",
+        "strength": "강점", "강점": "강점",
+        "yearly": "yearly",
+        "wealth": "재물운", "재물운": "재물운",
+        "career": "진로운", "진로운": "진로운",
+        "personality": "성격", "성격": "성격",
+        "love": "연애운", "연애운": "연애운",
+        "warning": "하반기경고", "하반기경고": "하반기경고"
+    }
+
+    section_key = section_map.get(request.section_name, request.section_name)
+    section_prompts = prompts.get("section_prompts", {}).get(section_key)
+
+    if not section_prompts:
+        raise HTTPException(status_code=400, detail=f"Unknown section: {request.section_name}")
+
+    variables = get_template_variables(request.saju_data, request.user_name)
+
+    common_system = prompts.get("common_system", "")
+    common_data_template = prompts.get("common_data_template", "")
+
+    system_prompt = section_prompts.get("system", "").replace("{common_system}", common_system)
+    user_template = section_prompts.get("user_template", "").replace("{common_data_template}", common_data_template)
+    user_message = render_template(user_template, variables)
+
+    async def generate():
+        """
+        V2.5 하이브리드 스트리밍 생성기
+
+        1. 토큰마다 event: token 전송
+        2. '---' 감지 시 event: part 전송
+        """
+        try:
+            buffer = ""
+            part_index = 0
+            token_count = 0
+            first_token_time = None
+            import time
+            start_time = time.time()
+
+            for chunk in llm_client.stream(system_prompt, user_message):
+                buffer += chunk
+                token_count += 1
+
+                # 첫 토큰 시간 기록
+                if first_token_time is None:
+                    first_token_time = time.time() - start_time
+                    print(f"[V2.5] ⚡ 첫 토큰: {first_token_time:.2f}초")
+
+                # ★ 토큰마다 실시간 전송 (핵심!)
+                yield {
+                    "event": "token",
+                    "data": json.dumps({"text": chunk}, ensure_ascii=False)
+                }
+
+                # '---' 구분자 감지 → 파트 완료
+                while "---" in buffer:
+                    idx = buffer.index("---")
+                    part_text = buffer[:idx].strip()
+                    buffer = buffer[idx + 3:]  # '---' 이후로 버퍼 이동
+
+                    if part_text:
+                        # 버튼 추출
+                        button_match = re.search(r'\[BUTTON:\s*([^\]]+)\]', part_text)
+                        button = button_match.group(1) if button_match else "다음"
+
+                        # 마커 제거 → 깔끔한 컨텐츠
+                        content = re.sub(r'\[BUTTON:\s*[^\]]+\]', '', part_text)
+                        content = re.sub(r'\[CARDS\][\s\S]*?\[\/CARDS\]', '', content)
+                        content = re.sub(r'\[블러:\s*[^\]]+\]', '???', content)
+                        content = content.strip()
+
+                        # ★ 파트 완료 전송 (버튼 활성화 트리거)
+                        print(f"[V2.5] 📦 Part {part_index} 완료: {len(content)} chars, button='{button}'")
+                        yield {
+                            "event": "part",
+                            "data": json.dumps({
+                                "index": part_index,
+                                "content": content,
+                                "button": button
+                            }, ensure_ascii=False)
+                        }
+                        part_index += 1
+
+            # 마지막 파트 (버퍼에 남은 것)
+            if buffer.strip():
+                part_text = buffer.strip()
+                button_match = re.search(r'\[BUTTON:\s*([^\]]+)\]', part_text)
+                button = button_match.group(1) if button_match else "다음"
+
+                content = re.sub(r'\[BUTTON:\s*[^\]]+\]', '', part_text)
+                content = re.sub(r'\[CARDS\][\s\S]*?\[\/CARDS\]', '', content)
+                content = re.sub(r'\[블러:\s*[^\]]+\]', '???', content)
+                content = content.strip()
+
+                if content:
+                    print(f"[V2.5] 📦 Final Part {part_index}: {len(content)} chars, button='{button}'")
+                    yield {
+                        "event": "part",
+                        "data": json.dumps({
+                            "index": part_index,
+                            "content": content,
+                            "button": button
+                        }, ensure_ascii=False)
+                    }
+                    part_index += 1
+
+            # 완료 이벤트
+            total_time = time.time() - start_time
+            print(f"[V2.5] ✅ 완료: {part_index} parts, {token_count} tokens, {total_time:.2f}초")
+            yield {
+                "event": "done",
+                "data": json.dumps({
+                    "total_parts": part_index,
+                    "total_tokens": token_count,
+                    "first_token_time": first_token_time,
+                    "total_time": total_time
+                }, ensure_ascii=False)
+            }
+
+        except Exception as e:
+            print(f"[V2.5] ❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            yield {"event": "error", "data": json.dumps({"error": str(e)}, ensure_ascii=False)}
+
+    return EventSourceResponse(
+        generate(),
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache"
+        }
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8001))
